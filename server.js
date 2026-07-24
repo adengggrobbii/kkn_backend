@@ -25,7 +25,8 @@ app.use(async (req, res, next) => {
 });
 
 // Serve static folder for student upload images
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const uploadPath = process.env.VERCEL ? '/tmp' : path.join(__dirname, 'uploads');
+app.use('/uploads', express.static(uploadPath));
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
