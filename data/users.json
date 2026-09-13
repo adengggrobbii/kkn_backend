@@ -1,0 +1,11 @@
+[
+  {
+    "_id": "65a000000000000000000001",
+    "username": "admin",
+    "email": "admin@kkn.ac.id",
+    "password": "$2a$10$gg3obmaUDNvmOUQNfCrhi.Y248D6XcaSDhEnabj3hOthlRlao9bH2",
+    "role": "admin",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  }
+]

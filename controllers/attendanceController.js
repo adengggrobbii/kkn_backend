@@ -1,7 +1,10 @@
+const mongoose = require('mongoose');
 const Attendance = require('../models/Attendance');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
+
+const isMongoConnected = () => mongoose.connection.readyState === 1;
 
 // ─────────────────────────────────────────────
 // Helper: format tanggal ke string Indonesia
@@ -228,6 +231,9 @@ const submitAttendance = async (req, res) => {
 // ─────────────────────────────────────────────
 const getAttendanceLogs = async (req, res) => {
   try {
+    if (!isMongoConnected()) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
     const { search, kelompok, status, startDate, endDate } = req.query;
     let query = {};
 

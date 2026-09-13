@@ -1,6 +1,41 @@
-const Documentation = require('../models/Documentation');
 const path = require('path');
 const fs = require('fs');
+const mongoose = require('mongoose');
+const Documentation = require('../models/Documentation');
+
+const dataDir = path.join(__dirname, '../data');
+const localDocsFile = path.join(dataDir, 'documentation.json');
+
+const ensureLocalDocs = () => {
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  if (!fs.existsSync(localDocsFile)) {
+    fs.writeFileSync(localDocsFile, JSON.stringify([]), 'utf-8');
+  }
+};
+
+const readLocalDocs = () => {
+  try {
+    ensureLocalDocs();
+    const raw = fs.readFileSync(localDocsFile, 'utf-8');
+    return JSON.parse(raw || '[]');
+  } catch (err) {
+    console.error('Error reading local documentation.json:', err);
+    return [];
+  }
+};
+
+const writeLocalDocs = (docs) => {
+  try {
+    ensureLocalDocs();
+    fs.writeFileSync(localDocsFile, JSON.stringify(docs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error writing local documentation.json:', err);
+  }
+};
+
+const isMongoConnected = () => mongoose.connection.readyState === 1;
 
 // @desc    Create new documentation entry (Admin Only)
 // @route   POST /api/documentation
@@ -22,13 +57,44 @@ const createDocumentation = async (req, res) => {
     const protocol = req.protocol;
     const fotoPath = `${protocol}://${host}/uploads/${req.file.filename}`;
 
-    const newDoc = await Documentation.create({
-      hariKe: Number(hariKe),
-      tanggal: new Date(tanggal),
-      judul,
-      deskripsi,
-      foto: fotoPath,
-    });
+    let newDoc = null;
+
+    if (isMongoConnected()) {
+      try {
+        newDoc = await Documentation.create({
+          hariKe: Number(hariKe),
+          tanggal: new Date(tanggal),
+          judul,
+          deskripsi,
+          foto: fotoPath,
+        });
+      } catch (dbErr) {
+        console.warn('MongoDB create doc error, using local fallback:', dbErr.message);
+      }
+    }
+
+    if (!newDoc) {
+      const localDocs = readLocalDocs();
+      newDoc = {
+        _id: new mongoose.Types.ObjectId().toString(),
+        hariKe: Number(hariKe),
+        tanggal: new Date(tanggal).toISOString(),
+        judul,
+        deskripsi,
+        foto: fotoPath,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      localDocs.push(newDoc);
+      // Sort by hariKe ascending
+      localDocs.sort((a, b) => Number(a.hariKe) - Number(b.hariKe));
+      writeLocalDocs(localDocs);
+    } else {
+      const localDocs = readLocalDocs();
+      localDocs.push(newDoc.toObject ? newDoc.toObject() : newDoc);
+      localDocs.sort((a, b) => Number(a.hariKe) - Number(b.hariKe));
+      writeLocalDocs(localDocs);
+    }
 
     res.status(201).json({
       success: true,
@@ -36,7 +102,7 @@ const createDocumentation = async (req, res) => {
       data: newDoc,
     });
   } catch (error) {
-    console.error(error);
+    console.error('Create documentation error:', error);
     res.status(500).json({ success: false, message: 'Server Error: ' + error.message });
   }
 };
@@ -46,11 +112,22 @@ const createDocumentation = async (req, res) => {
 // @access  Public
 const getAllDocumentation = async (req, res) => {
   try {
-    const docs = await Documentation.find({}).sort({ hariKe: 1 });
-    res.json({ success: true, count: docs.length, data: docs });
+    if (isMongoConnected()) {
+      try {
+        const docs = await Documentation.find({}).sort({ hariKe: 1 });
+        return res.json({ success: true, count: docs.length, data: docs });
+      } catch (dbErr) {
+        console.warn('MongoDB getAllDocumentation error:', dbErr.message);
+      }
+    }
+
+    const localDocs = readLocalDocs();
+    localDocs.sort((a, b) => Number(a.hariKe) - Number(b.hariKe));
+    res.json({ success: true, count: localDocs.length, data: localDocs });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: 'Server Error: ' + error.message });
+    console.error('getAllDocumentation error:', error);
+    const localDocs = readLocalDocs();
+    res.json({ success: true, count: localDocs.length, data: localDocs });
   }
 };
 
@@ -59,26 +136,42 @@ const getAllDocumentation = async (req, res) => {
 // @access  Private (Admin Only)
 const deleteDocumentation = async (req, res) => {
   try {
-    const doc = await Documentation.findById(req.params.id);
+    const { id } = req.params;
 
-    if (!doc) {
-      return res.status(404).json({ success: false, message: 'Dokumentasi tidak ditemukan' });
-    }
-
-    // Delete image file from disk if it exists
-    if (doc.foto) {
-      const filename = doc.foto.split('/').pop();
-      const filePath = path.join(__dirname, '../uploads', filename);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    if (isMongoConnected()) {
+      try {
+        const doc = await Documentation.findById(id);
+        if (doc) {
+          if (doc.foto) {
+            const filename = doc.foto.split('/').pop();
+            const filePath = path.join(__dirname, '../uploads', filename);
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+            }
+          }
+          await doc.deleteOne();
+        }
+      } catch (dbErr) {
+        console.warn('MongoDB deleteDoc error:', dbErr.message);
       }
     }
 
-    await doc.deleteOne();
+    // Hapus juga dari penyimpanan lokal
+    const localDocs = readLocalDocs();
+    const target = localDocs.find((d) => String(d._id) === String(id));
+    if (target && target.foto) {
+      const filename = target.foto.split('/').pop();
+      const filePath = path.join(__dirname, '../uploads', filename);
+      if (fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch {}
+      }
+    }
+    const filtered = localDocs.filter((d) => String(d._id) !== String(id));
+    writeLocalDocs(filtered);
 
     res.json({ success: true, message: 'Dokumentasi berhasil dihapus' });
   } catch (error) {
-    console.error(error);
+    console.error('deleteDocumentation error:', error);
     res.status(500).json({ success: false, message: 'Server Error: ' + error.message });
   }
 };

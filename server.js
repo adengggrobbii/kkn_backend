@@ -32,6 +32,7 @@ app.use('/uploads', express.static(uploadPath));
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
 app.use('/api/documentation', require('./routes/documentationRoutes'));
+app.use('/api/comments', require('./routes/commentRoutes'));
 
 // Root Endpoint
 app.get('/', (req, res) => {
